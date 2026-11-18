@@ -20,10 +20,10 @@ const [tick, setTick] = createSignal(Date.now())
 
 const BAR_CELLS = 10
 const LABEL_WIDTH = 4
-/** Digits only: "100.0". */
-const PERCENT_WIDTH = 5
+/** Digits only: the API reports whole percents, so "100" is the widest. */
+const PERCENT_WIDTH = 3
 const RESET_WIDTH = 5
-/** label + bar + "≥100.0%" + space + countdown. */
+/** label + bar + "≥100%" + space + countdown. */
 const VALUE_COLUMN = LABEL_WIDTH + BAR_CELLS
 const LINE_WIDTH = VALUE_COLUMN + 1 + PERCENT_WIDTH + 1 + 1 + RESET_WIDTH
 
@@ -38,11 +38,12 @@ function colorFor(window: UsageWindow, theme: ResolvedTheme) {
 }
 
 /**
- * One decimal place. `prefix` is the whole first column, so a `≥` lower bound
- * lines up with the plain values instead of pushing the row out.
+ * Whole percents, matching what the endpoint reports. `prefix` is the whole
+ * first column, so a `≥` lower bound lines up with the plain values instead of
+ * pushing the row out.
  */
 function percentField(value: number, prefix = " "): string {
-  return `${prefix}${value.toFixed(1).padStart(PERCENT_WIDTH)}%`
+  return `${prefix}${String(Math.round(value)).padStart(PERCENT_WIDTH)}%`
 }
 
 function cells(percent: number): number {
@@ -182,7 +183,7 @@ export default Plugin.define({
         setState({ loading: false, snapshot: result, error: result.ok ? undefined : result.error })
         if (notify) {
           const summary = result.ok
-            ? result.windows.map((window) => `${window.label} ${window.percent.toFixed(1)}%`).join(" · ")
+            ? result.windows.map((window) => `${window.label} ${Math.round(window.percent)}%`).join(" · ")
             : (result.error ?? "usage unavailable")
           context.ui.toast.show({
             title: "OpenCode Go",

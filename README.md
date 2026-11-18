@@ -5,17 +5,17 @@ OpenCode Go allowance in the OpenCode TUI sidebar: today's consumption, the
 
 ```
 ▾ OpenCode Go Usage 2m
-today           12.4%
-───────────────────────────
-5h  █░░░░░░░░░  5.0% 1h02m
-wk  █░░░░░░░░░ 12.4% 4d13h
-mo  ████████░░ 77.0% 3d07h
+today              12%
+─────────────────────────
+5h   █░░░░░░░░░   5% 1h02m
+wk   █░░░░░░░░░  12% 4d13h
+mo   ████████░░  77% 3d07h
 ```
 
 Click the header to collapse it to one line, the same way the Context and MCP
 headers behave; the collapsed state is remembered. The right-hand column of the
 three bars is the time until that window resets. Bars turn amber at 80% and red
-at 100%. Percentages are shown to one decimal place.
+at 100%. Percentages are whole numbers, the resolution the endpoint reports.
 
 ## Install
 
@@ -108,8 +108,9 @@ monthly = 100%. A 5% reading on the 5-hour bar is therefore 1% of the month.
 - Otherwise it is a lower bound: the 5-hour window when it opened after midnight
   (converted to the monthly scale — everything in such a window is today's), or
   the delta since the first reading today, whichever is larger. It renders as
-  `≥ 1.0%`, and the line is dropped entirely when that bound is zero, rather
-  than claiming 0%.
+  `≥ 1%`, and the line is dropped entirely when that bound is zero, rather than
+  claiming 0%. It is rounded to whole percents like everything else, so a bound
+  of 2.4 reads as 2%.
 
 `today` is shown on the monthly scale; the three bars keep the per-window scale
 the Console uses, so they compare directly with the Console's own gauges.
@@ -134,6 +135,43 @@ non-zero amount to check the layout:
 
 ```jsonc
 { "options": { "overageUsd": 12.5 } }
+```
+
+## Watching for new endpoints
+
+Re-check these whenever Console ships API changes. Last checked 2026-11-18
+against both a `usage: read` key and a full-access key — same answers.
+
+- [ ] **USD overspend** — no source at all today. If `/zen/go/v1/usage` (or any
+      sibling) grows a field for money spent past the plan, feed it into
+      `spentOver` in `src/index.ts` and the `over` line lights up on its own.
+      Delete the `overageUsd` harness once a real figure exists.
+- [ ] **Today's usage or spend** — no daily window exists, so `src/today.ts`
+      reconstructs it (measured monthly delta, else a monthly-scaled floor from
+      the 5-hour window). A real per-day series would replace that file's
+      heuristics wholesale, and would also fix the ±1 point rounding.
+- [ ] **Fractional percents** — `percent` is a whole number per window, which is
+      why the panel does not show decimals. If it gains them, `PERCENT_WIDTH` in
+      `src/tui.tsx` grows and `today` gets precise for free.
+- [ ] **Absolute money in the usage response** — if per-window dollar amounts
+      appear, compute every percentage from those rather than differencing
+      rounded integers, as the README section above notes.
+- [ ] **`/api/experimental/usage/limits` with data** — returns
+      `UsageLimits.Go` with fractional percents, but only when the location is
+      signed in to a Console workspace (`null` here, and `opencode auth list`
+      has no Console account). Worth preferring if a Console sign-in lands in
+      the TUI.
+
+How to re-check:
+
+```bash
+KEY=<a opencode-go key>
+curl -s https://opencode.ai/zen/go/v1/usage -H "Authorization: Bearer $KEY"
+for p in spend billing credits balance invoice usage/daily; do
+  printf '%-14s %s\n' "$p" \
+    "$(curl -s -o /dev/null -w '%{http_code}' https://opencode.ai/zen/go/v1/$p -H "Authorization: Bearer $KEY")"
+done
+opencode api get /api/experimental/usage/limits
 ```
 
 A real figure would need the server part to sum `opencode.allowance` from every
