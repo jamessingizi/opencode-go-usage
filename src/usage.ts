@@ -47,12 +47,6 @@ export interface UsageSnapshot {
   /** Milliseconds since the epoch, local clock, when the fetch finished. */
   fetchedAt: number
   windows: UsageWindow[]
-  /**
-   * Dollars spent this month beyond the subscription, when the month is over
-   * 100%. `undefined` until that happens — or until the gateway reports a
-   * figure we can trust (today it does not, so the server part reports 0).
-   */
-  spentOver?: number
   /** Human readable failure, present only when `ok` is false. */
   error?: string
 }
@@ -176,4 +170,29 @@ export async function fetchUsage(
         : String(error)
     return { ok: false, fetchedAt: Date.now(), windows: [], error: reason }
   }
+}
+
+/**
+ * Best effort human message for a thrown value. RPC failures arrive as plain
+ * objects (`{ type, message, data }`), not Errors, so `String(error)` would
+ * print `[object Object]`.
+ */
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  if (error && typeof error === "object") {
+    const detail = error as { message?: unknown; type?: unknown }
+    if (typeof detail.message === "string" && detail.message.length > 0) {
+      return typeof detail.type === "string" && detail.type.length > 0
+        ? `${detail.type}: ${detail.message}`
+        : detail.message
+    }
+    if (typeof detail.type === "string" && detail.type.length > 0) return detail.type
+    try {
+      return JSON.stringify(error) ?? String(error)
+    } catch {
+      return String(error)
+    }
+  }
+  return String(error)
 }

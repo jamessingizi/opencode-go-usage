@@ -6,7 +6,7 @@ import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import type { ResolvedTheme } from "@opencode/theme/tui"
 import { For, Show, createSignal } from "solid-js"
 import { GoUsage } from "./rpc.ts"
-import type { UsageSnapshot, UsageWindow } from "./usage.ts"
+import { errorMessage, type UsageSnapshot, type UsageWindow } from "./usage.ts"
 
 interface State {
   loading: boolean
@@ -27,9 +27,7 @@ const RESET_WIDTH = 5
 const VALUE_COLUMN = LABEL_WIDTH + BAR_CELLS
 const LINE_WIDTH = VALUE_COLUMN + 1 + PERCENT_WIDTH + 1 + 1 + RESET_WIDTH
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
+
 
 function colorFor(window: UsageWindow, theme: ResolvedTheme) {
   if (window.percent >= 100) return theme.text.feedback.error.base
@@ -87,18 +85,6 @@ function Today(props: { window: UsageWindow }) {
   )
 }
 
-/** Spend past the subscription, only when the month is over 100%. */
-function Overage(props: { usd: number }) {
-  const context = usePlugin()
-  const amount = () => `$${props.usd.toFixed(2)}`
-  return (
-    <box flexDirection="row">
-      <text fg={context.theme.text.muted}>{"over".padEnd(VALUE_COLUMN)}</text>
-      <text fg={context.theme.text.feedback.warning.base}>{amount().padStart(PERCENT_WIDTH + 2)}</text>
-    </box>
-  )
-}
-
 function Row(props: { window: UsageWindow }) {
   const context = usePlugin()
   const theme = () => context.theme
@@ -106,14 +92,15 @@ function Row(props: { window: UsageWindow }) {
   const reset = () => countdown(props.window.resetsAt, tick())
 
   // Fixed-width <text> runs: the bar glyphs carry the value, so rows stay
-  // aligned in any terminal font.
+  // aligned in any terminal font. The bar is one run — a zero-width run for an
+  // empty half collapses and shifts the row.
+  const bar = () => "█".repeat(filled()) + "░".repeat(BAR_CELLS - filled())
   return (
     <box flexDirection="row">
       <text fg={theme().text.muted}>{props.window.label.padEnd(LABEL_WIDTH)}</text>
-      <text fg={colorFor(props.window, theme())}>{"█".repeat(filled())}</text>
-      <text fg={theme().text.faint}>{"░".repeat(BAR_CELLS - filled())}</text>
+      <text fg={colorFor(props.window, theme())}>{bar()}</text>
       <text fg={colorFor(props.window, theme())}>{percentField(props.window.percent)}</text>
-      <text fg={theme().text.faint}>{reset() ? ` ${reset().padStart(RESET_WIDTH)}` : ""}</text>
+      <text fg={theme().text.faint}>{` ${reset().padStart(RESET_WIDTH)}`}</text>
     </box>
   )
 }
@@ -130,11 +117,6 @@ function Panel(props: PanelProps) {
   const today = (): UsageWindow | undefined => snapshot()?.windows.find((item) => item.id === "today")
   const rest = (): UsageWindow[] => snapshot()?.windows.filter((item) => item.id !== "today") ?? []
   const fresh = () => (snapshot() ? age(snapshot()!.fetchedAt, tick()) : "")
-  // No amount known, or nothing spent past the subscription: no line.
-  const overage = () => {
-    const amount = snapshot()?.spentOver
-    return amount !== undefined && amount > 0 ? amount : undefined
-  }
 
   return (
     <box flexDirection="column">
@@ -148,7 +130,6 @@ function Panel(props: PanelProps) {
           {today() === undefined ? null : <Today window={today()!} />}
           <text fg={context.theme.text.faint}>{"─".repeat(LINE_WIDTH)}</text>
           <For each={rest()}>{(item) => <Row window={item} />}</For>
-          {overage() === undefined ? null : <Overage usd={overage()!} />}
         </Show>
         <Show when={error()}>
           <text fg={context.theme.text.feedback.error.base}>{error()}</text>
@@ -193,7 +174,7 @@ export default Plugin.define({
         }
       } catch (error) {
         if (disposed) return
-        setState((previous) => ({ ...previous, loading: false, error: messageOf(error) }))
+        setState((previous) => ({ ...previous, loading: false, error: errorMessage(error) }))
       }
     }
 

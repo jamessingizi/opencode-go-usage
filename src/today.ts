@@ -24,6 +24,8 @@ export interface DayState {
   last: number
   /** `baseline` came from yesterday's last reading, so `today` is measured. */
   exact: boolean
+  /** Largest lower bound established today, kept across 5-hour window resets. */
+  floor: number
 }
 
 export interface RollingReading {
@@ -82,11 +84,10 @@ export function deriveToday(input: TodayInput): TodayResult {
     exact = false
   }
 
-  const state: DayState = { day, baseline, last: current, exact }
-
   if (exact) {
+    // Measured: monthly now against a reading from before midnight.
     return {
-      state,
+      state: { day, baseline, last: current, exact: true, floor: 0 },
       today: {
         id: "today",
         label: "today",
@@ -96,15 +97,19 @@ export function deriveToday(input: TodayInput): TodayResult {
     }
   }
 
-  // Lower bound: everything in a window that opened after midnight is today's,
-  // plus whatever the monthly counter has moved since this day's first reading.
+  // Lower bound. Everything in a 5-hour window that opened after midnight is
+  // today's usage, and the monthly counter cannot move backwards within a day,
+  // so the largest bound seen today still holds after that window resets.
   const sinceReading = Math.max(0, current - baseline)
   const start = rollingWindowStart(rolling)
   const rollingToday =
     rolling && Number.isFinite(start) && start >= startOfUtcDay(now)
       ? rolling.percent * WINDOW_SHARE_OF_MONTH.rolling
       : 0
-  const floor = Math.max(sinceReading, rollingToday)
+  const carried = stored?.day === day ? (stored.floor ?? 0) : 0
+  const floor = Math.max(sinceReading, rollingToday, carried)
+
+  const state: DayState = { day, baseline, last: current, exact: false, floor }
   if (floor <= 0) return { state }
 
   return {

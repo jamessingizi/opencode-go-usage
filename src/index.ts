@@ -23,9 +23,6 @@ export default Plugin.define({
   async setup(ctx) {
     const cacheMs = Math.max(0, Number(ctx.options.cacheSeconds ?? DEFAULT_CACHE_SECONDS) * 1000)
     const baseUrl = typeof ctx.options.apiBaseUrl === "string" ? ctx.options.apiBaseUrl : undefined
-    const overageUsd =
-      typeof ctx.options.overageUsd === "number" ? (ctx.options.overageUsd as number) : undefined
-
     let cache: { at: number; snapshot: UsageSnapshot } | undefined
 
     async function withToday(snapshot: UsageSnapshot): Promise<UsageSnapshot> {
@@ -44,7 +41,8 @@ export default Plugin.define({
         previous.day !== result.state.day ||
         previous.baseline !== result.state.baseline ||
         previous.last !== result.state.last ||
-        previous.exact !== result.state.exact
+        previous.exact !== result.state.exact ||
+        previous.floor !== result.state.floor
       ) {
         // Storage takes plain JSON; DayState has no index signature.
         await ctx.storage.set(DAY_STATE_KEY, result.state as unknown as Record<string, string | number | boolean>)
@@ -52,13 +50,7 @@ export default Plugin.define({
 
       const windows = [...snapshot.windows]
       if (result.today) windows.splice(monthlyAt, 0, result.today)
-
-      // Nothing in the API reports money spent past the subscription: the only
-      // dollar figures are per response (`usage.opencode.allowance`), there is
-      // no month-to-date spend endpoint, and the Console's own figure needs a
-      // Console session rather than a Go key. So this stays undefined unless
-      // `overageUsd` supplies a figure for layout work.
-      return { ...snapshot, windows, ...(overageUsd === undefined ? {} : { spentOver: overageUsd }) }
+      return { ...snapshot, windows }
     }
 
     async function load(signal: AbortSignal | undefined, force: boolean): Promise<UsageSnapshot> {

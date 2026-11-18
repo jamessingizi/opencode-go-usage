@@ -143,8 +143,8 @@ the Console uses, so they compare directly with the Console's own gauges.
 
 ### Nothing reports spend past the subscription
 
-When the month goes over 100% the panel can show an `over` line for the money
-spent past the Go allowance. There is no API for it:
+There is no `over` line for the money spent past the Go allowance, because
+there is no API for it:
 
 - `/zen/go/v1/usage` has no spend or overage field, and no `/spend`, `/billing`,
   `/credits`, `/balance` or `/usage/daily` sibling exists.
@@ -155,23 +155,20 @@ spent past the Go allowance. There is no API for it:
 - The only dollars the key sees are per response: `usage.opencode.allowance`
   (what the request counted against the plan) and `list_cost` / `cost`.
 
-So the `over` line is only rendered when a figure that is both known and above
-zero exists, which today means never. `overageUsd` in the plugin options pins a
-non-zero amount to check the layout:
-
-```jsonc
-{ "options": { "overageUsd": 12.5 } }
-```
+Re-deriving it from `opencode.allowance` would need the server part to tee
+every inference response, would only see this machine since the plugin loaded,
+and would still need the plan's dollar limit to locate 100%. Not attempted —
+see the checklist below if an endpoint ever appears.
 
 ## Watching for new endpoints
 
 Re-check these whenever Console ships API changes. Last checked 2026-11-18
 against both a `usage: read` key and a full-access key — same answers.
 
-- [ ] **USD overspend** — no source at all today. If `/zen/go/v1/usage` (or any
-      sibling) grows a field for money spent past the plan, feed it into
-      `spentOver` in `src/index.ts` and the `over` line lights up on its own.
-      Delete the `overageUsd` harness once a real figure exists.
+- [ ] **USD overspend** — no source at all today, so the panel says nothing
+      about it. If `/zen/go/v1/usage` (or any sibling) grows a field for money
+      spent past the plan, add it to `UsageSnapshot` in `src/usage.ts` and render
+      it under the bars, gated on a non-zero amount.
 - [ ] **Today's usage or spend** — no daily window exists, so `src/today.ts`
       reconstructs it (measured monthly delta, else a monthly-scaled floor from
       the 5-hour window). A real per-day series would replace that file's
