@@ -7,7 +7,7 @@ OpenCode Go allowance in the OpenCode TUI sidebar: today's consumption, the
 ▾ OpenCode Go Usage 2m
 today           12.4%
 ───────────────────────────
-5h  █░░░░░░░░░   5.0% 1h02m
+5h  █░░░░░░░░░  5.0% 1h02m
 wk  █░░░░░░░░░ 12.4% 4d13h
 mo  ████████░░ 77.0% 3d07h
 ```

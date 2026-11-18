@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Test
+        run: bun test
+
+  package:
+    # Proves the package the way OpenCode loads it: exports resolvable, all
+    # three parts present. No publish — this plugin is installed by path.
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Pack
+        run: bun pm pack --destination dist
+
+      - name: Check the tarball carries every part
+        run: |
+          set -euo pipefail
+          tar tzf dist/*.tgz | sort | tee /tmp/files
+          for part in package/src/index.ts package/src/tui.tsx package/src/rpc.ts; do
+            grep -qx "$part" /tmp/files || { echo "missing $part"; exit 1; }
+          done
