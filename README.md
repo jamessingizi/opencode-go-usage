@@ -19,17 +19,43 @@ at 100%. Percentages are whole numbers, the resolution the endpoint reports.
 
 ## Install
 
-```
-git clone <this repo> opencode-go-usage
-cd opencode-go-usage && bun install
+OpenCode installs plugins straight from Git — no clone needed. Pick whichever
+suits you:
+
+```sh
+# tracks the default branch, pinned to the installed commit
+opencode plugin add github:mzealey/opencode-go-usage
+
+# a branch, tag or commit
+opencode plugin add 'github:mzealey/opencode-go-usage#main'
+opencode plugin add 'git+ssh://git@github.com/mzealey/opencode-go-usage.git#<sha>'
 ```
 
-Then point OpenCode at the directory — in `~/.config/opencode/opencode.jsonc`:
+`opencode plugin update` re-checks unpinned Git plugins; exact commits stay
+pinned. Or write the entry yourself in `~/.config/opencode/opencode.jsonc`:
+
+```jsonc
+{
+  "plugins": ["github:mzealey/opencode-go-usage"],
+}
+```
+
+For development, point at the checkout instead — edits then reload with the
+config watcher, no push required:
 
 ```jsonc
 {
   "plugins": ["/absolute/path/to/opencode-go-usage"],
 }
+```
+
+Only configure one of the two: loading both gives `Duplicate plugin ID:
+go-usage`. Note `opencode plugin add` rewrites `opencode.jsonc` and drops
+comments from the file.
+
+```sh
+git clone https://github.com/mzealey/opencode-go-usage
+cd opencode-go-usage && bun install
 ```
 
 Config reloads on save (`/reload` forces it). The sidebar appears in the
