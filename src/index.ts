@@ -46,7 +46,8 @@ export default Plugin.define({
         previous.last !== result.state.last ||
         previous.exact !== result.state.exact
       ) {
-        await ctx.storage.set(DAY_STATE_KEY, result.state)
+        // Storage takes plain JSON; DayState has no index signature.
+        await ctx.storage.set(DAY_STATE_KEY, result.state as unknown as Record<string, string | number | boolean>)
       }
 
       const windows = [...snapshot.windows]
