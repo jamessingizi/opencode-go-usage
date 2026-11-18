@@ -129,7 +129,11 @@ function Panel(props: PanelProps) {
   const today = (): UsageWindow | undefined => snapshot()?.windows.find((item) => item.id === "today")
   const rest = (): UsageWindow[] => snapshot()?.windows.filter((item) => item.id !== "today") ?? []
   const fresh = () => (snapshot() ? age(snapshot()!.fetchedAt, tick()) : "")
-  const overage = () => snapshot()?.spentOver
+  // No amount known, or nothing spent past the subscription: no line.
+  const overage = () => {
+    const amount = snapshot()?.spentOver
+    return amount !== undefined && amount > 0 ? amount : undefined
+  }
 
   return (
     <box flexDirection="column">

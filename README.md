@@ -50,7 +50,6 @@ Commands, in the palette under **OpenCode Go**:
       "options": {
         "refreshMinutes": 5, // poll interval, minimum 30s
         "cacheSeconds": 60, // server-side cache shared by every TUI
-        // "overageUsd": 0, // test harness for the over-subscription line
       },
     },
   ],
@@ -129,11 +128,12 @@ spent past the Go allowance. There is no API for it:
 - The only dollars the key sees are per response: `usage.opencode.allowance`
   (what the request counted against the plan) and `list_cost` / `cost`.
 
-So the line is only rendered when a figure is known. `overageUsd` in the plugin
-options is a test harness that pins the line for layout work:
+So the `over` line is only rendered when a figure that is both known and above
+zero exists, which today means never. `overageUsd` in the plugin options pins a
+non-zero amount to check the layout:
 
 ```jsonc
-{ "options": { "overageUsd": 0 } }
+{ "options": { "overageUsd": 12.5 } }
 ```
 
 A real figure would need the server part to sum `opencode.allowance` from every
