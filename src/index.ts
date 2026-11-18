@@ -83,10 +83,8 @@ export default Plugin.define({
     }
 
     await ctx.rpc.register(GoUsage, {
-      usage: async (input, context) => {
-        const force = (input as { force?: boolean } | undefined)?.force === true
-        return load(context.signal, force)
-      },
+      usage: async (_input, context) => load(context.signal, false),
+      refresh: async (_input, context) => load(context.signal, true),
     })
   },
 })

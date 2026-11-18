@@ -1,10 +1,14 @@
 /**
- * TUI part: OpenCode Go allowance inside the right-hand sidebar, refreshed
- * every five minutes (configurable), plus `/go-usage` refresh and collapse.
+ * TUI part: OpenCode Go allowance inside the right-hand sidebar.
+ *
+ * Polling belongs to the mounted panel, not to setup: a plugin reload disposes
+ * setup's timers while the host can keep the last rendered panel on screen, and
+ * the panel then sits there frozen. A component that owns its own timer keeps
+ * updating for as long as it is actually on screen.
  */
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import type { ResolvedTheme } from "@opencode/theme/tui"
-import { For, Show, createSignal } from "solid-js"
+import { For, Show, createSignal, onCleanup, onMount } from "solid-js"
 import { GoUsage } from "./rpc.ts"
 import { errorMessage, type UsageSnapshot, type UsageWindow } from "./usage.ts"
 
@@ -15,8 +19,11 @@ interface State {
 }
 
 const [state, setState] = createSignal<State>({ loading: true })
-/** Re-rendered every 30s so the reset countdowns stay honest between polls. */
+/** Re-rendered every 30s so the age and reset countdowns stay honest. */
 const [tick, setTick] = createSignal(Date.now())
+
+/** After a failure, try again sooner than the normal interval. */
+const RETRY_MS = 30_000
 
 const BAR_CELLS = 10
 const LABEL_WIDTH = 4
@@ -26,8 +33,6 @@ const RESET_WIDTH = 5
 /** label + bar + "≥100%" + space + countdown. */
 const VALUE_COLUMN = LABEL_WIDTH + BAR_CELLS
 const LINE_WIDTH = VALUE_COLUMN + 1 + PERCENT_WIDTH + 1 + 1 + RESET_WIDTH
-
-
 
 function colorFor(window: UsageWindow, theme: ResolvedTheme) {
   if (window.percent >= 100) return theme.text.feedback.error.base
@@ -108,15 +113,41 @@ function Row(props: { window: UsageWindow }) {
 interface PanelProps {
   collapsed: boolean
   onToggle: () => void
+  /** Refreshes and reports whether it succeeded. */
+  poll: (force: boolean) => Promise<boolean>
+  intervalMs: number
 }
 
 function Panel(props: PanelProps) {
   const context = usePlugin()
   const snapshot = (): UsageSnapshot | undefined => state().snapshot
-  const error = (): string | undefined => state().error ?? (snapshot()?.ok === false ? snapshot()?.error : undefined)
+  const error = (): string | undefined =>
+    state().error ?? (snapshot()?.ok === false ? snapshot()?.error : undefined)
   const today = (): UsageWindow | undefined => snapshot()?.windows.find((item) => item.id === "today")
   const rest = (): UsageWindow[] => snapshot()?.windows.filter((item) => item.id !== "today") ?? []
   const fresh = () => (snapshot() ? age(snapshot()!.fetchedAt, tick()) : "")
+
+  onMount(() => {
+    let stopped = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const tick = () => setTick(Date.now())
+    const clock = setInterval(tick, 30_000)
+
+    const run = async () => {
+      const ok = await props.poll(false)
+      if (stopped) return
+      timer = setTimeout(run, ok ? props.intervalMs : RETRY_MS)
+    }
+
+    void run()
+
+    onCleanup(() => {
+      stopped = true
+      clearInterval(clock)
+      if (timer !== undefined) clearTimeout(timer)
+    })
+  })
 
   return (
     <box flexDirection="column">
@@ -150,38 +181,28 @@ export default Plugin.define({
     const intervalMs = Math.max(30, minutes) * 60_000
 
     const [ui, updateUI] = context.storage.store("panel", { initial: { collapsed: false } })
-    const toggle = () => void updateUI((draft) => {
-      draft.collapsed = !draft.collapsed
-    })
+    const toggle = () =>
+      void updateUI((draft) => {
+        draft.collapsed = !draft.collapsed
+      })
 
     let disposed = false
 
-    async function refresh(force = false, notify = false) {
+    /** Reads the live client each call: it changes after a server restart. */
+    async function poll(force: boolean): Promise<boolean> {
       try {
+        const client = context.client.rpc(GoUsage)
         // JSON Schema methods are typed `unknown`; the server part is the only writer.
-        const result = (await context.client.rpc(GoUsage).usage({ force })) as UsageSnapshot
-        if (disposed) return
+        const result = (force ? await client.refresh({}) : await client.usage({})) as UsageSnapshot
+        if (disposed) return false
         setState({ loading: false, snapshot: result, error: result.ok ? undefined : result.error })
-        if (notify) {
-          const summary = result.ok
-            ? result.windows.map((window) => `${window.label} ${Math.round(window.percent)}%`).join(" · ")
-            : (result.error ?? "usage unavailable")
-          context.ui.toast.show({
-            title: "OpenCode Go",
-            message: summary,
-            variant: result.ok ? "info" : "error",
-          })
-        }
+        return true
       } catch (error) {
-        if (disposed) return
+        if (disposed) return false
         setState((previous) => ({ ...previous, loading: false, error: errorMessage(error) }))
+        return false
       }
     }
-
-    void refresh()
-
-    const poll = setInterval(() => void refresh(), intervalMs)
-    const clock = setInterval(() => setTick(Date.now()), 30_000)
 
     context.keymap.layer(() => ({
       mode: "global",
@@ -192,7 +213,22 @@ export default Plugin.define({
           group: "OpenCode Go",
           palette: true,
           slash: { name: "go-usage", aliases: ["gou"] },
-          run: () => refresh(true, true),
+          run: async () => {
+            const ok = await poll(true)
+            const current = state()
+            const summary = !ok
+              ? (error() ?? "usage unavailable")
+              : current.snapshot?.ok
+                ? current.snapshot.windows
+                    .map((window) => `${window.label} ${Math.round(window.percent)}%`)
+                    .join(" · ")
+                : (current.snapshot?.error ?? "usage unavailable")
+            context.ui.toast.show({
+              title: "OpenCode Go",
+              message: summary,
+              variant: ok && current.snapshot?.ok ? "info" : "error",
+            })
+          },
         },
         {
           id: "go-usage.toggle",
@@ -204,15 +240,31 @@ export default Plugin.define({
       ],
     }))
 
+    function error(): string | undefined {
+      return state().error ?? (state().snapshot?.ok === false ? state().snapshot?.error : undefined)
+    }
+
+    // Belt and braces: the mounted panel owns its own timer, and this one keeps
+    // the shared state fresh even if the host leaves the panel unmounted (a
+    // sidebar that is closed, or a stale render from before a reload). The
+    // server caches for a minute, so the extra call is free.
+    const fallback = setInterval(() => void poll(false), intervalMs)
+
     context.ui.slot({
       append: "sidebar.content",
-      render: () => <Panel collapsed={ui.collapsed} onToggle={toggle} />,
+      render: () => (
+        <Panel
+          collapsed={ui.collapsed}
+          onToggle={toggle}
+          poll={poll}
+          intervalMs={intervalMs}
+        />
+      ),
     })
 
     return () => {
       disposed = true
-      clearInterval(poll)
-      clearInterval(clock)
+      clearInterval(fallback)
     }
   },
 })
