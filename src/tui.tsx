@@ -1,6 +1,6 @@
 /**
- * TUI part: allowance bars inside the right-hand sidebar, refreshed every five
- * minutes (configurable), plus a `/go-usage` refresh command.
+ * TUI part: OpenCode Go allowance inside the right-hand sidebar, refreshed
+ * every five minutes (configurable), plus `/go-usage` refresh and collapse.
  */
 import { Plugin, usePlugin } from "@opencode/plugin/tui"
 import type { ResolvedTheme } from "@opencode/theme/tui"
@@ -20,8 +20,12 @@ const [tick, setTick] = createSignal(Date.now())
 
 const BAR_CELLS = 10
 const LABEL_WIDTH = 4
+/** Digits only: "100.0". */
+const PERCENT_WIDTH = 5
 const RESET_WIDTH = 5
-const SEPARATOR_WIDTH = 25
+/** label + bar + "≥100.0%" + space + countdown. */
+const VALUE_COLUMN = LABEL_WIDTH + BAR_CELLS
+const LINE_WIDTH = VALUE_COLUMN + 1 + PERCENT_WIDTH + 1 + 1 + RESET_WIDTH
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -31,6 +35,14 @@ function colorFor(window: UsageWindow, theme: ResolvedTheme) {
   if (window.percent >= 100) return theme.text.feedback.error.base
   if (window.percent >= 80) return theme.text.feedback.warning.base
   return theme.text.base
+}
+
+/**
+ * One decimal place. `prefix` is the whole first column, so a `≥` lower bound
+ * lines up with the plain values instead of pushing the row out.
+ */
+function percentField(value: number, prefix = " "): string {
+  return `${prefix}${value.toFixed(1).padStart(PERCENT_WIDTH)}%`
 }
 
 function cells(percent: number): number {
@@ -54,21 +66,34 @@ function countdown(resetsAt: string | undefined, now: number): string {
 
 function age(fetchedAt: number, now: number): string {
   const seconds = Math.max(0, Math.round((now - fetchedAt) / 1000))
-  if (seconds < 45) return "just now"
+  if (seconds < 45) return ""
   const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  return `${Math.round(minutes / 60)}h ago`
+  return minutes < 60 ? `${minutes}m` : `${Math.round(minutes / 60)}h`
 }
 
-/** `today` is a number only (the API has no daily window), so it gets no bar. */
+/** `today` is a number only — the API has no daily window — so it gets no bar. */
 function Today(props: { window: UsageWindow }) {
   const context = usePlugin()
   const theme = () => context.theme
-  const counter = () => `${String(Math.round(props.window.percent)).padStart(3)}%`
+  const floor = () => props.window.status === "floor"
   return (
     <box flexDirection="row">
-      <text fg={theme().text.muted}>{"today".padEnd(LABEL_WIDTH + BAR_CELLS + 1)}</text>
-      <text fg={colorFor(props.window, theme())}>{counter()}</text>
+      <text fg={theme().text.muted}>{"today".padEnd(VALUE_COLUMN)}</text>
+      <text fg={floor() ? theme().text.faint : colorFor(props.window, theme())}>
+        {percentField(props.window.percent, floor() ? "≥" : " ")}
+      </text>
+    </box>
+  )
+}
+
+/** Spend past the subscription, only when the month is over 100%. */
+function Overage(props: { usd: number }) {
+  const context = usePlugin()
+  const amount = () => `$${props.usd.toFixed(2)}`
+  return (
+    <box flexDirection="row">
+      <text fg={context.theme.text.muted}>{"over".padEnd(VALUE_COLUMN)}</text>
+      <text fg={context.theme.text.feedback.warning.base}>{amount().padStart(PERCENT_WIDTH + 2)}</text>
     </box>
   )
 }
@@ -77,48 +102,55 @@ function Row(props: { window: UsageWindow }) {
   const context = usePlugin()
   const theme = () => context.theme
   const filled = () => cells(props.window.percent)
-  const counter = () => `${String(Math.round(props.window.percent)).padStart(3)}%`
   const reset = () => countdown(props.window.resetsAt, tick())
 
-  // One row of fixed-width <text> runs — the bar glyphs carry the value, so the
-  // rows stay aligned and readable in any terminal font.
+  // Fixed-width <text> runs: the bar glyphs carry the value, so rows stay
+  // aligned in any terminal font.
   return (
     <box flexDirection="row">
       <text fg={theme().text.muted}>{props.window.label.padEnd(LABEL_WIDTH)}</text>
       <text fg={colorFor(props.window, theme())}>{"█".repeat(filled())}</text>
       <text fg={theme().text.faint}>{"░".repeat(BAR_CELLS - filled())}</text>
-      <text fg={colorFor(props.window, theme())}>{` ${counter()}`}</text>
+      <text fg={colorFor(props.window, theme())}>{percentField(props.window.percent)}</text>
       <text fg={theme().text.faint}>{reset() ? ` ${reset().padStart(RESET_WIDTH)}` : ""}</text>
     </box>
   )
 }
 
-function Panel() {
+interface PanelProps {
+  collapsed: boolean
+  onToggle: () => void
+}
+
+function Panel(props: PanelProps) {
   const context = usePlugin()
   const snapshot = (): UsageSnapshot | undefined => state().snapshot
   const error = (): string | undefined => state().error ?? (snapshot()?.ok === false ? snapshot()?.error : undefined)
   const today = (): UsageWindow | undefined => snapshot()?.windows.find((item) => item.id === "today")
   const rest = (): UsageWindow[] => snapshot()?.windows.filter((item) => item.id !== "today") ?? []
-  const title = () => {
-    const current = snapshot()
-    if (current?.ok) return `Go usage · ${age(current.fetchedAt, tick())}`
-    if (state().loading) return "Go usage · …"
-    return "Go usage"
-  }
+  const fresh = () => (snapshot() ? age(snapshot()!.fetchedAt, tick()) : "")
+  const overage = () => snapshot()?.spentOver
 
   return (
     <box flexDirection="column">
-      <text fg={context.theme.text.muted}>{title()}</text>
-      <Show when={snapshot()?.ok}>
-        {today() === undefined ? null : <Today window={today()!} />}
-        <text fg={context.theme.text.faint}>{"─".repeat(SEPARATOR_WIDTH)}</text>
-        <For each={rest()}>{(item) => <Row window={item} />}</For>
-      </Show>
-      <Show when={error()}>
-        <text fg={context.theme.text.feedback.error.base}>{error()}</text>
-      </Show>
-      <Show when={snapshot()?.windows.some((window) => window.status !== "ok")}>
-        <text fg={context.theme.text.feedback.warning.base}>limit reached</text>
+      <box flexDirection="row" onMouseDown={props.onToggle}>
+        <text fg={context.theme.text.muted}>{props.collapsed ? "▸ " : "▾ "}</text>
+        <text fg={context.theme.text.base}>OpenCode Go Usage</text>
+        <text fg={context.theme.text.faint}>{fresh() ? ` ${fresh()}` : ""}</text>
+      </box>
+      <Show when={!props.collapsed}>
+        <Show when={snapshot()?.ok}>
+          {today() === undefined ? null : <Today window={today()!} />}
+          <text fg={context.theme.text.faint}>{"─".repeat(LINE_WIDTH)}</text>
+          <For each={rest()}>{(item) => <Row window={item} />}</For>
+          {overage() === undefined ? null : <Overage usd={overage()!} />}
+        </Show>
+        <Show when={error()}>
+          <text fg={context.theme.text.feedback.error.base}>{error()}</text>
+        </Show>
+        <Show when={snapshot()?.windows.some((window) => window.status === "limit_reached")}>
+          <text fg={context.theme.text.feedback.warning.base}>limit reached</text>
+        </Show>
       </Show>
     </box>
   )
@@ -131,6 +163,11 @@ export default Plugin.define({
     const minutes = Number.isFinite(configured) && configured > 0 ? configured : 5
     const intervalMs = Math.max(30, minutes) * 60_000
 
+    const [ui, updateUI] = context.storage.store("panel", { initial: { collapsed: false } })
+    const toggle = () => void updateUI((draft) => {
+      draft.collapsed = !draft.collapsed
+    })
+
     let disposed = false
 
     async function refresh(force = false, notify = false) {
@@ -141,7 +178,7 @@ export default Plugin.define({
         setState({ loading: false, snapshot: result, error: result.ok ? undefined : result.error })
         if (notify) {
           const summary = result.ok
-            ? result.windows.map((window) => `${window.label} ${Math.round(window.percent)}%`).join(" · ")
+            ? result.windows.map((window) => `${window.label} ${window.percent.toFixed(1)}%`).join(" · ")
             : (result.error ?? "usage unavailable")
           context.ui.toast.show({
             title: "OpenCode Go",
@@ -171,10 +208,20 @@ export default Plugin.define({
           slash: { name: "go-usage", aliases: ["gou"] },
           run: () => refresh(true, true),
         },
+        {
+          id: "go-usage.toggle",
+          title: "Collapse or expand Go usage",
+          group: "OpenCode Go",
+          palette: true,
+          run: () => toggle(),
+        },
       ],
     }))
 
-    context.ui.slot({ append: "sidebar.content", render: () => <Panel /> })
+    context.ui.slot({
+      append: "sidebar.content",
+      render: () => <Panel collapsed={ui.collapsed} onToggle={toggle} />,
+    })
 
     return () => {
       disposed = true

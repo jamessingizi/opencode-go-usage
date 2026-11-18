@@ -35,6 +35,7 @@ export const GoUsage = Rpc.define({
           ok: { type: "boolean" },
           fetchedAt: { type: "number" },
           windows: { type: "array", items: window },
+          spentOver: { type: "number" },
           error: { type: "string" },
           /** True when the server answered from its own short-lived cache. */
           cached: { type: "boolean" },

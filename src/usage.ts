@@ -33,7 +33,10 @@ export interface UsageWindow {
   label: string
   /** 0-100 (may exceed 100 with Extra Usage on). */
   percent: number
-  /** `ok`, `limit_reached`, … — passed through, never interpreted. */
+  /**
+   * `ok`, `limit_reached`, … — passed through for the API windows. The derived
+   * `today` window uses `ok` for a measured value and `floor` for a lower bound.
+   */
   status: string
   /** ISO timestamp of the next reset, when the API reports one. */
   resetsAt?: string
@@ -44,6 +47,12 @@ export interface UsageSnapshot {
   /** Milliseconds since the epoch, local clock, when the fetch finished. */
   fetchedAt: number
   windows: UsageWindow[]
+  /**
+   * Dollars spent this month beyond the subscription, when the month is over
+   * 100%. `undefined` until that happens — or until the gateway reports a
+   * figure we can trust (today it does not, so the server part reports 0).
+   */
+  spentOver?: number
   /** Human readable failure, present only when `ok` is false. */
   error?: string
 }
